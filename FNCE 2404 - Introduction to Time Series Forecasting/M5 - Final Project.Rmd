@@ -1,0 +1,707 @@
+---
+title: 'Final Project: Residential Power Usage in Houston, Tx'
+author: ' Emily Sutton, Luc Ginestet-Araki, Mathew Chan, Wyatt Garrett'
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+library(fpp2)
+library(dplyr)
+library(ggplot2)
+library(ggcorrplot)
+library(ggpubr)
+library(apsrtable)
+library(TSstudio)
+library(urca)
+library(car)
+```
+
+# Introduction
+
+This project studies residential power usage in Houston Texas, analyzing time series data between June 2016 and August 2020. This report is tailored towards power grid suppliers where forecasts of power usage can allow suppliers to anticipate and meet consumer demand and properly apply surge pricing.
+
+We choose this topic because of the blackouts that Texas experienced due to improper energy grid management. We want to build a forecasting model to help power suppliers anticipate power usage and adapt for the future.
+
+# Data Analysis
+
+Our power data came from TRIEAGLE ENERGY LP, The Woodlands, Texas 77393. The historical weather data for Houston, Texas was extracted from “www.wunderground.com” The data required extensive cleaning. The dates in the two data sets would flip formatting on the 13th of the month, which required complicated cleaning. 
+
+```{r, echo = FALSE}
+setwd("C:/Users/wyatt/Documents/Spring Quarter 2021/FNCE 2404 (Introduction to Time Series Forecasting)")
+weather_data <- read.csv("C:/Users/wyatt/Documents/Spring Quarter 2021/FNCE 2404 (Introduction to Time Series Forecasting)/weather_updated.csv")
+power_data <- read.csv("C:/Users/wyatt/Documents/Spring Quarter 2021/FNCE 2404 (Introduction to Time Series Forecasting)/power_updated.csv")
+forecast_data <- read.csv("C:/Users/wyatt/Documents/Spring Quarter 2021/FNCE 2404 (Introduction to Time Series Forecasting)/weather_forecast.csv")
+```
+
+```{r include = FALSE}
+# old code for merge purposes below is hidden
+```
+```{r include =FALSE}
+# old code for merge purposes
+power <- as.data.frame(power_data)
+weather <- as.data.frame(weather_data)
+power_col <- as.Date(power$Date)
+weather_col <- as.Date(weather$Date)
+drop <- ('Date')
+power <- power[,!(names(power) %in% drop)]
+weather <- weather[,!(names(weather) %in% drop)]
+power2 <- power
+power['Date'] <- power_col
+weather2<- weather
+weather['Date'] <-weather_col
+power2 <- power
+power2 <-cbind(power, new_col =power_col)
+names(power2)[names(power2) == "new_col"] <- "Date"
+power2
+power3 <- power2[,c(7,1,2,3)]
+power3
+weather2 <- weather
+weather2 <-cbind(weather, new_col =weather_col)
+names(weather2)[names(weather2) == "new_col"] <- "Date"
+weather3 <- weather2[,c(20,1:19)]
+weather3
+avg_power <- aggregate(power3$Value_kWh,by=list(date = power3$Date),data=power3,FUN=mean)
+names(avg_power)[names(avg_power) == "x"] <-'KWH_Total'
+names(avg_power)[names(avg_power) =='date'] <-'Date'
+total <- merge(avg_power,weather3,by="Date")
+more_drops <-c('Day of Week','Notes','Day','day_of_week')
+total2 <- total[,!(names(total) %in% more_drops)]
+avg_drop <- ('Date')
+avg_power2 <- avg_power[,!(names(avg_power) %in% avg_drop)]
+avg_power2 <- 24*avg_power2
+start_date = as.numeric(as.Date("2016-06-06")-as.Date("2016-01-01"))
+end_date = as.numeric(as.Date("2020-07-07")-as.Date("2020-01-01"))
+avg_power_ts <- ts(avg_power2, start=c(2016,6), end = c(2020,8), frequency = 365)
+# make the time series weekly so ETS will work
+avg_power_weekly_ts <- ts(avg_power_ts,  frequency = 7)
+dates <- seq(as.Date("2016-06-06"), as.Date("2020-07-07"), by ='day')
+avg_power_ts2 <- ts(avg_power2,  start = as.Date.default(dates[1]), frequency = 24)
+
+
+```
+
+
+```{r echo=FALSE}
+by_month_df <- subset(total2, select=c(2,19))
+
+by_month_df_2 <- by_month_df %>% 
+  group_by(Month) %>%
+  summarise_at(vars(KWH_Total),
+               list(name = mean))
+
+month_list <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+
+by_month_df_3 <- by_month_df_2[match(month_list, by_month_df_2$Month),]
+names(by_month_df_3)[2]<-paste("Average_Monthly_Power_Usage_Across_Years")
+
+```
+
+
+```{r echo = FALSE}
+#new code starts here
+drops <-c('Hour','Day','day_of_week','notes')
+power_data <- power_data[,!(names(power_data) %in% drops)]
+```
+```{r echo = FALSE}
+sum_power <- aggregate(24*power_data$Value_kWh,by=list(power_data$Date),data=power_data,FUN=mean)
+colnames(sum_power) <-c('Date','Total_KWH')
+total <- merge(weather_data, sum_power, by='Date')
+```
+```{r echo = FALSE}
+sum_power <- sum_power[,2]
+sum_power_ts <- ts(sum_power, start=c(2016,6), end = c(2020,8), frequency = 365)
+```
+
+
+```{r include = FALSE}
+power_data$date_formatted <- as.Date(power_data$Date)
+power_trimmed <- with(power_data,power_data[(date_formatted >= '2016-06-06' & date_formatted <= '2020-07-05'), ])
+
+power_daily <- aggregate(power_trimmed$Value_kWh,
+                         by = list(date_formatted = power_trimmed$date_formatted),
+                         FUN = sum)
+
+names(power_daily)[names(power_daily) == 'x'] <- 'total_kwh'
+power_daily$year_wk <- format(power_daily$date_formatted, '%Y-%V')
+
+power_weekly <- aggregate(power_daily$total_kwh,
+                          by = list(year_wk = power_daily$year_wk),
+                          FUN = sum)
+
+names(power_weekly)[names(power_weekly) == 'x'] <- 'total_kwh'
+power_weekly_nodate <- subset(power_weekly, select=c(total_kwh))
+power_weekly_ts <- ts(power_weekly_nodate ,start=c(2016,22), frequency=52)
+
+weather_data$date_formatted <- as.Date(weather_data$Date)
+weather_trimmed <- with(weather_data,weather_data[(date_formatted >= '2016-06-06' & date_formatted <= '2020-07-05'), ])
+
+weather_trimmed$year_wk <- format(weather_trimmed$date_formatted, '%Y-%V')
+weather_weekly <- setNames(aggregate(list(weather_trimmed$Temp_avg,
+                                          weather_trimmed$Dew_avg,
+                                          weather_trimmed$Hum_avg,
+                                          weather_trimmed$Wind_avg,
+                                          weather_trimmed$Press_avg,
+                                          weather_trimmed$Precipit),
+                                      by = list(year_wk = weather_trimmed$year_wk),
+                                      FUN = sum),
+                           c('year_wk',
+                             'temp_avg',
+                             'dew_avg',
+                             'hum_avg',
+                             'wind_avg',
+                             'press_avg',
+                             'precipit'))
+#weather_weekly$week_num <- substr(weather_weekly$year_wk, 6, 7)
+
+merged_data <- merge(power_weekly, weather_weekly, by = 'year_wk')
+merged_nodate <- subset(merged_data, select = c(total_kwh,
+                                                temp_avg,
+                                                dew_avg,
+                                                hum_avg,
+                                                wind_avg,
+                                                press_avg,
+                                                precipit))
+
+merged_final <- transform(merged_nodate,
+                            total_kwh = as.numeric(total_kwh),
+                            temp_avg = as.numeric(temp_avg),
+                            dew_avg = as.numeric(dew_avg),
+                            hum_avg = as.numeric(hum_avg),
+                            wind_avg = as.numeric(wind_avg),
+                            press_avg = as.numeric(press_avg),
+                            precipit = as.numeric(precipit))
+
+
+merged_ts <- ts(merged_final, start=c(2016,22), frequency = 52)
+
+training_ts <- window(merged_ts, start = c(2016,22), end = c(2019,27))
+
+test_ts <- window(merged_ts, start = c(2019,28))
+
+forecast_data$date_formatted <- as.Date(forecast_data$time)
+forecast_data$year_wk <- format(forecast_data$date_formatted, '%Y-%V')
+forecast_weekly <- setNames(aggregate(list(forecast_data$tavg,
+                                           forecast_data$wspd,
+                                           forecast_data$prcp),
+                                      by = list(year_wk = forecast_data$year_wk),
+                                      FUN = mean),
+                            c('year_wk',
+                              'temp_avg',
+                              'wind_avg',
+                              'precipit'))
+forecast_nodate <- subset(forecast_weekly, select = c(temp_avg,
+                                                      wind_avg,
+                                                      precipit))
+forecast_final <- transform(forecast_nodate,
+                            temp_avg = as.numeric(temp_avg),
+                            wind_avg = as.numeric(wind_avg),
+                            precipit = as.numeric(precipit))
+
+forecast_ts <- ts(forecast_final, start=c(2019,14), frequency = 52)
+
+
+
+forecast_data <- data.frame(test_ts)
+```
+
+
+
+
+
+```{r echo=FALSE}
+#plot using base R
+exhibit1 <- autoplot(power_weekly_ts)+
+  ggtitle("Aggreagate Weekly Power Consumption")+
+  xlab("Year")+ylab("KWH")
+```
+
+```{r include= FALSE}
+#seasonal plot
+exhibit2 <- ggseasonplot(power_weekly_ts) +
+  ggtitle("Seasonal Plot of Weekly Electricity Consumption") +
+  xlab("Month") + ylab("kWh") +
+  scale_x_continuous(breaks=c(0,.0833,.1666,.25,.3333,.4166,.5,.5833,.6666,.75,.8333,.9166),labels=c("Jan","Feb","Mar","Apr","May", "June","July", "Aug", "Sept", "Oct", "Nov", "Dec"))
+```
+
+
+
+```{r echo = FALSE}
+by_month_df_3$Month <- factor(by_month_df_3$Month, levels = by_month_df_3$Month[order(by_month_df_3$Average_Monthly_Power_Usage_Across_Years)])
+
+exhibit3 <- ggplot(by_month_df_3, aes(Month, Average_Monthly_Power_Usage_Across_Years)) +   
+    geom_bar(stat = 'identity')  +
+  ggtitle("Average Monthly Electricity Consumption Across Years") +
+  xlab("Month") + ylab("KWH") +
+  theme(axis.text.x = element_text(angle = 15))
+```
+
+```{r include = FALSE}
+#correlation of selected data
+data_numer <- subset(total, select=c(21,4,7,10,13,16,18))
+ggcorplot1 <- ggcorrplot(cor(data_numer, use="pairwise.complete.obs"), hc.order = FALSE, type='lower', lab=TRUE, lab_size=2.5)
+
+
+ggcorplot2 <- ggcorrplot(cor(subset(merged_data, select = c(total_kwh,
+                                              temp_avg,
+                                              dew_avg,
+                                              hum_avg,
+                                              wind_avg,
+                                              press_avg,
+                                              precipit)
+                      ),
+               use = 'pairwise.complete.obs'),
+           hc.order = FALSE,
+           type = 'lower',
+           lab = TRUE,
+           lab_size = 2.5)
+
+exhibit4 <- ggcorplot2
+```
+
+
+```{r echo = FALSE}
+ggarrange(exhibit1, exhibit2, labels = c("A.", "B."), ncol = 1, nrow = 2)
+
+```
+
+
+
+```{r echo = FALSE}
+ggarrange(exhibit3, exhibit4, 
+          labels = c("C.", "D."),
+          ncol = 1, nrow = 2)
+```
+
+**A.** The data shows strong seasonality. From this graph it appears there may downward trend to the data. 
+
+**B.** There appears to be strong seasonality across years.
+
+**C.** August is the month with the highest power consumption followed closely by the other summer months. Early fall (September) power usage was lower than late spring power usage (May).
+
+**D.** Power consumption is most strongly correlated with temperature, which is logical. Dew and power consumption are strongly correlated as well which is surprising. This may be due to dew's very strong correlation with temperature. 
+
+
+**Data Manipulation**
+
+We found that working with daily data presented a host of problems when creating models. These included ARIMA or ETS models not supporting the lags necessary for the data, and other complications. As a result we choose to use an aggregate of weekly power consumption. We use this weekly data set for the rest of our data analysis and the rest of our forecasting models and will refer to it as the "time series" or "the data". 
+
+```{r echo = FALSE}
+head(power_weekly_ts)
+```
+
+
+```{r include= FALSE}
+exhibit5 <- ggAcf(power_weekly_ts) +
+  ggtitle("Autocorrelations of time series by lag") +
+  xlab("Week") + ylab("ACF")
+```
+```{r include = FALSE}
+lambda1 = BoxCox.lambda(power_weekly_ts)
+power_weekly_ts_bc <- BoxCox(power_weekly_ts,lambda=lambda1)
+lambda1
+
+exhibit6 <- autoplot(power_weekly_ts_bc)+
+  ggtitle("Box-Cox Transformed Time Series")+
+  xlab("Year")+ylab("KWH")
+```
+```{r echo = FALSE}
+ggarrange(exhibit5, exhibit6, 
+          labels = c("E.", "F."),
+          ncol = 1, nrow = 2)
+```
+
+**Autocorrelation between days of the time series:**
+
+**E.** Lag one was the highest of any of the lags and had the highest autocorrelation of 0.845. The data shows lags with significant differences from zero, which means that past data can have significant prediction power on the future. The ACF plot exhibits clear seasonality and because the autocorrelations are higher at smaller lags the data may exhibit some trend (it appears to decay to zero very slowly). The data appears non-stationary.
+
+**Exploring transforming the data:**
+
+We could use a lambda of -0.2466745 in a Box-Cox transformation to stabilize the seasonal variation. Since the variance in the seasonality of the original data is decreasing over time the negative sign of the calculated lambda makes sense. However we won't initially transform the data. For the basic naive and seasonal forecasts we will explore the data without transformation. In our ETS function the multiplicative damping may solve this issue.
+
+**F.** The transformed data appears to have constant variation across time. 
+
+
+
+**Should we use differencing?**
+
+```{r include = FALSE}
+library(urca)
+summary(ur.kpss(power_weekly_ts))
+```
+```{r include = FALSE}
+library(tseries)
+adf.test(power_weekly_ts, k=0)
+```
+
+Using a Kwiatkowski_Phillips-Schmidt-Shin test yields a test statistic of 0.2635  This test statistic is lower than the five percent critical value of 0.463 so we accept (can't reject) the null that the data is stationary. Using an augmented Dickey-Fuller test we arrive at -3.8832 which is lower than the test statistic of 0.01 and we accept (can't reject) the null hypothesis that the time series is a random walk.  The differences in these two tests is likely due to the Dickey-Fuller test being a unit root test and the KPSS test being a stationary test, and likely means that the data does not give enough observations. Using nsdiffs we found that differencing was necessary to create stationary data.
+
+```{r include=FALSE}
+ndiffs(power_weekly_ts)
+```
+
+```{r include = FALSE}
+ndiffs(power_weekly_ts, test="adf")
+
+```
+
+
+```{r include=FALSE}
+nsdiffs(power_weekly_ts)
+
+```
+
+
+
+From our data analysis we expect that models that incorporate seasonality and stabilize for variation in seasonality will perform best. We also expect a model with zero or one differences to perform well. 
+
+# Forecasting Model Selection
+
+**Basic Forecasting Models:**
+```{r echo = FALSE}
+
+library(TSstudio)
+split <- ts_split(ts.obj=power_weekly_ts, sample.out = 52)
+training <- split$train
+test <- split$test
+
+
+split <- ts_split(ts.obj = merged_ts, sample.out = 52)
+training_ts <- split$train
+test_ts <- split$test
+
+test_data <- data.frame(test_ts)
+```
+
+```{r include = FALSE}
+meanfit <- meanf(training,h=length(test))
+rwffit <- rwf(training,drift = TRUE, h=length(test))
+naivefit <- naive(training, h=length(test))
+snaivefit <- snaive(training, h= length(test))
+
+'Mean Model Accuracy'
+accuracy(meanfit, test)
+  
+'Drift Model Accuracy'
+accuracy(rwffit, test)
+
+'Naive Model Accuracy'
+accuracy(naivefit, test)
+  
+'Seasonal Naive Model Accuracy'
+accuracy(snaivefit,test)
+```
+
+```{r include = FALSE}
+checkresiduals(snaivefit)
+autoplot(residuals(snaivefit))
+```
+
+
+We first applied basic forecasting models, comparing mean, naive, drift and seasonal naive methods. The Seasonal Naive Model had the highest accuracy in the test set. This is expected due to the very apparent seasonality of the data. The graph of the four models are seen in Exhibit G.
+
+```{r echo = FALSE}
+exhibit7 <- autoplot(power_weekly_ts) + autolayer(meanfit, PI = FALSE, series = "Mean") + autolayer(rwffit, PI = FALSE, series = "rwffit") + autolayer(naivefit, PI=FALSE, series = "Naive") + autolayer(snaivefit, PI = FALSE, series = "Snaive")+
+  ggtitle("Basic Forecasting Models")+
+  xlab("Year")+ylab("KWH")
+```
+
+
+
+
+```{r include= FALSE}
+
+stlffit <- forecast(stlf(training), h=52)
+
+exhibit8 <- autoplot(stlffit, series = "STL + ETS") +
+  autolayer(power_weekly_ts, series = "Weekly Data")+
+  xlab("Year")+ylab("KWH")
+
+accuracy(stlffit, test)
+
+```
+
+
+
+```{r echo = FALSE}
+ggarrange(exhibit7, exhibit8, 
+          labels = c("G.", "H."),
+          ncol = 1, nrow = 2)
+```
+
+**G.** Of the basic models the seasonal naive method clearly fits the model the best. However there was significant information left in the residuals, so we continued exploring for a better model.
+
+**ETS models:**
+
+Exploring ETS models with the data was impossible due to the high frequency of the data (52). As a result we chose to use a Seasonal and Trend decomposition using Loess + ETS model.
+
+**H.** The blue STL forecast appears to fit the model fairly well. The STL + ETS model had a lower RMSE than the seasonal naive method (as well as a lower MAE, MAPE, and MASE). While the STL + ETS model was more accurate than the seasonal naive method, the model still did not account for all of the information available . The STL + ETS model failed the Ljung-Box test which means that the data exhibits serial correlation in the residuals that has not been included in the model. Our search for a model continued. 
+
+
+**Regression Models:**
+
+We began our survey of regression models by exploring the correlations between the variables seen in Exhibit I (and earlier in Exhibit B). We noted that average dew, humidity and pressure were all strongly correlated with temperature. Including all these variables into a model could lead to imperfect multicollinearity. 
+
+We first used a backwards step-wise regression model on all available variables. With the inclusion of of date and dummy variables for month the backwards step-wise regression was still outperformed by a time series regression model.
+
+We found that a parsimonious time series regression model that included the average temperature for the week, the average pressure, and the average precipitation was the mot accurate model that avoided multicollinearity. Including any other variable increased the standard error of all regression terms. 
+
+
+
+```{r regression, echo=FALSE}
+#do not include dew_avg, hum_avg, and press_avg since they are strongly correlated with temperature to avoid multicollinearity
+exhibit9 <- ggcorrplot(cor(subset(merged_data, select = c(total_kwh,
+                                              temp_avg,
+                                              dew_avg,
+                                              hum_avg,
+                                              wind_avg,
+                                              press_avg,
+                                              precipit)
+                      ),
+               use = 'pairwise.complete.obs'),
+           hc.order = FALSE,
+           type = 'lower',
+           lab = TRUE,
+           lab_size = 2.5)
+
+reg1 <- tslm(total_kwh ~ temp_avg, data = training_ts)
+reg3 <- tslm(total_kwh ~ temp_avg + wind_avg + precipit, data = training_ts)
+```
+
+```{r echo = FALSE}
+
+for_reg <- forecast(reg3, newdata = test_data)
+
+exhibit10 <- autoplot(for_reg)
+```
+
+
+```{r echo = FALSE}
+ggarrange(exhibit9, exhibit10, 
+          labels = c("I.", "J."),
+          ncol = 1, nrow = 2)
+```
+
+**Exhibit J.** The regression model appears to model seasonality well and but only explains roughly 70% of the variation in the data. 
+
+
+
+```{r echo=FALSE}
+summary(reg3)
+checkresiduals(reg3)
+```
+
+The regression model still did not account for all of the available information. There appear to be many spikes in the residuals from the linear model and the ACF graph shows greater than 5% of the lags are significantly autocorrelated. The model's failure of the Breusch-Godfrey test confirms that information remains in the residuals. We continued our search. 
+
+**ARIMA Models:**
+
+We began by finding an ARIMA model using auto.arima. 
+
+```{r echo=FALSE}
+fit_arima <- auto.arima(training)
+for_ari <- forecast(fit_arima ,h=52)
+exhibit11 <- autoplot(forecast(fit_arima ,h=52))+
+  ggtitle("Forecast from ARIMA (2,1,1)(1,1,0)[52]")+
+  xlab("Year")+ylab("KWH")
+
+
+```
+
+
+```{r echo = FALSE}
+exhibit12 <- autoplot(residuals(fit_arima))+
+  ggtitle("Residuals from ARIMA(2,1,1)(1,1,0)[52]")+
+  xlab("Year")+ylab("Residuals")
+ggarrange(exhibit11, exhibit12, 
+          labels = c("K.", "L."),
+          ncol = 1, nrow = 2)
+```
+
+
+**K.** Using the auto.arima function we found that a SARIMA model describing power consumption combined a first order Auto-Regressive model with one degree of first differencing and a 1st order Moving Average model. In addition the model has a seasonal first order auto-regressive component and one order of seasonal differencing with a 52 week cycle.
+
+We suspected from our earlier exploration of stationarity that first differencing would be required. We also were not surprised to see a seasonal difference that included an annual cycle. 
+
+
+
+**L.** The residuals of the SARIMA model were not calculated for the first 52 time stamps used in the seasonal differencing. The model showed a spike in the 63rd week, and again in the 122nd week for two August residual spikes. 
+
+```{r echo=FALSE}
+checkresiduals(fit_arima, plot=F)
+```
+The SARIMA model narrowly failed the Ljung-Box test, meaning that there agian is information left in the data not captured by the model.
+
+**Dynamic Regression Models:**
+
+We began our exploration of dynamic regression models with a model that combined an ARIMA with our earlier regression model. 
+```{r dynamic, include = FALSE}
+dyn <- auto.arima(training_ts[,'total_kwh'],
+                  lambda = BoxCox.lambda(training_ts[,'total_kwh']),
+                  xreg = cbind(training_ts[,'temp_avg'],
+                               training_ts[,'wind_avg'],
+                               training_ts[,'precipit']))
+for_dyn <- forecast(dyn,
+                    xreg = cbind(test_ts[,'temp_avg'],
+                                 test_ts[,'wind_avg'],
+                                 test_ts[,'precipit']))
+
+```
+
+
+```{r echo = FALSE}
+exhibit14 <- autoplot(for_dyn)+
+  ggtitle("Forecast from Dynamic Regression with ARIMA (1,0,3)(1,0,0)[52]")+
+  xlab("Year")+ylab("KWH")
+
+ggarrange(exhibit14,  
+          labels = c("M."),
+          ncol = 1, nrow = 1)
+
+```
+
+**M. ** The dynamic regression model produced a regression and SARIMA model that combined a first order Auto-Regressive model with a 3rd order Moving Average model. In addition the model has a seasonal first order auto-regressive component.
+
+```{r echo = FALSE}
+checkresiduals(dyn, plot=F)
+```
+
+
+The model again failed the Ljung-Box test indicating that there is information available in the data not being captured by the model.
+
+**Dynamic Harmonic Regression Model:**
+
+We then moved on to our final model a dynamic harmonic regression model that combined regression and SARIMA components. 
+
+"When there are long seasonal periods, a dynamic regression with Fourier terms is often better than other models we have considered in this book." - Robert Hyndman
+
+```{r harmonic, echo = FALSE}
+plots <- list()
+for (i in seq(6)) {
+  har_loop <- auto.arima(training_ts[,'total_kwh'],
+                         lambda = BoxCox.lambda(training_ts[,'total_kwh']),
+                         xreg = fourier(cbind(training_ts[,'temp_avg'],
+                                              training_ts[,'wind_avg'],
+                                              training_ts[,'precipit']),
+                                        K = i),
+                         seasonal = TRUE)
+  plots[[i]] <- autoplot(forecast(har_loop,
+                                  xreg=fourier(cbind(test_ts[,'temp_avg'],
+                                                     test_ts[,'wind_avg'],
+                                                     test_ts[,'precipit']),
+                                               K = i))) +
+    xlab(paste("K=", i, "   AICC=", round(har_loop[["aicc"]], 2))) +
+    ylab("")
+}
+gridExtra::grid.arrange(
+  plots[[1]],plots[[2]],plots[[3]],
+  plots[[4]],plots[[5]],plots[[6]],
+  nrow=3)
+
+har <- auto.arima(training_ts[,'total_kwh'], xreg = fourier(cbind(training_ts[,'temp_avg'],
+                                                                  training_ts[,'wind_avg'],
+                                                                  training_ts[,'precipit']),
+                                                            K = 6),
+                  seasonal = TRUE)
+for_har <- forecast(har,
+                    xreg=fourier(cbind(test_ts[,'temp_avg'],
+                                       test_ts[,'wind_avg'],
+                                       test_ts[,'precipit']),
+                                 K = 6))
+```
+
+The dynamic regression model produced six forecasts with different K, the number of Fourier sin and cos pairs. We selected the model with K equal to 6 because it had the lowest AICC and the best accuracy. 
+
+```{r echo = FALSE}
+exhibit15 <- autoplot(for_har)+ggtitle("Forecast from Dynamic Harmonic Regression with ARIMA (2,1,1)(1,0,1)[52]")+
+  xlab("Year")+ylab("KWH")
+ggarrange(exhibit15,
+          labels = c("N."),
+          ncol = 1, nrow = 1)
+```
+
+**N.** The dynamic harmonic regression combined a regression and SARIMA model describing power consumption. The SARIMA component combined a 2nd order Auto-Regressive model with one degree of first differencing and a 1st order Moving Average model. In addition the model has a seasonal first order auto-regressive component and 1st order seasonal moving average with a 52 week cycle.
+
+
+```{r echo=FALSE}
+checkresiduals(har)
+```
+
+Excitingly, the dynamic harmonic regression model passed the Ljung-Box test. The model residuals were normally distributed and the ACF plot showed no significant serial correlation between lags. The plot of the residuals appears to have zero mean. 
+
+Let's now compare the dynamic harmonic regression model to all the models.
+
+**Comparing All Models:**
+
+```{r echo=FALSE}
+"STL + ETS model accuracy"
+accuracy(stlffit,test_ts[,'total_kwh'])
+"Regression model accuracy"
+accuracy(for_reg,test_ts[,'total_kwh'])
+"SARIMA model accuracy"
+accuracy(for_ari,test_ts[,'total_kwh'])
+"Dynamic Regression Model accuracy"
+accuracy(for_dyn,test_ts[,'total_kwh'])
+"Dynamic Harmonic Regression Model accuracy"
+accuracy(for_har,test_ts[,'total_kwh'])
+```
+
+Despite having a lower RMSE than other models on the test data set the Dynamic Harmonic Regression Model is the only model to not show signicant information left in the residuals.
+
+We have selected the dynamic harmonic regression model for our forecast.
+
+**Forecast:**
+
+We first began by applying dynamic harmonic regression to the entire data set to build our final forecasting model. Using a forecast of the next three months we applied the model to the forecasted data (the forecast was built using a python script to pull weather data to simulate a forecast). 
+
+
+```{r echo= FALSE}
+
+har2 <- auto.arima(merged_ts[,'total_kwh'], xreg = fourier(cbind(merged_ts[,'temp_avg'],
+                                                                  merged_ts[,'wind_avg'],
+                                                                  merged_ts[,'precipit']),
+                                                            K = 6),
+                  seasonal = TRUE)
+
+```
+
+```{r echo = FALSE}
+forecast_ts2 <- window(forecast_ts, start=2020.666, end=2021)
+for_har2 <- forecast(har2,
+                    xreg=fourier(cbind(forecast_ts2[,'temp_avg'],
+                                       forecast_ts2[,'wind_avg'],
+                                       forecast_ts2[,'precipit']),
+                                 K = 6), h=90)
+```
+
+Three month forecast of the Dynamic Regression model
+```{r echo=FALSE}
+exhibit17 <- autoplot(for_har2)+ggtitle("Final Forecast from Dynamic Harmonic Regression with ARIMA (3,1,2)(1,0,1)[52]")+
+  xlab("Year")+ylab("KWH")
+ggarrange(exhibit17,  
+          labels = c("O."),
+          ncol = 1, nrow = 1)
+```
+
+The point forecast itself:
+```{r echo = FALSE}
+for_har2
+```
+
+
+
+**Solutions and Recommendations: **
+
+
+* How does the forecast help you make decisions?
+  + Apply surge pricing during summer months due to seasonal increases power usage due to hot weather
+  + Increase power storage capacity to meet max forecasted demand for power
+  + Build out alternative energy production capacity to match demand and to take advantage of government tax credits for renewable energy projects
+  + Stay aligned with 2035 goal of carbon pollution-free power sector
+  + Balance reliability concerns with the increased storage capacity and traditional fossil fuel sources to supplement periods of reduced production from green energy sources
+  + Anticipate a potential Carbon Tax which will proactively help protect the bottom line
+
