@@ -7,3 +7,7 @@ demand and properly apply surge pricing.
 We choose this topic because of the blackouts that Texas experienced due to improper
 energy grid management. We want to build a forecasting model to help power suppliers
 anticipate power usage and adapt for the future.
+
+## Files
+- **Final Writeup**: Final Project.pdf
+- **Python Code**: M5 - Final Project.rmd
