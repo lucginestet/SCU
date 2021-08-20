@@ -10,4 +10,4 @@ anticipate power usage and adapt for the future.
 
 ## Files
 - **Final Writeup**: Final Project.pdf
-- **R Markdown Code**: M5 - Final Project.Rmd
+- **R Code**: M5 - Final Project.Rmd
