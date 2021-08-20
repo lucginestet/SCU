@@ -6,5 +6,5 @@ We are interested in seeing how managers discussed pandemic-related risk factors
 
 To measure performance we will analyze the average Sharpe Ratio change from before the pandemic to after the pandemic by industry and compare the differences between the companies that did disclose and didn’t disclose in each industry. We will also examine whether companies that did disclose had higher alpha, risk adjusted excess return, than companies that did not.
 
-- **Final Writeup: Capstone Report.docx
-- **Python Code: Management Disclosure and COVID-19.ipynb
+- **Final Writeup**: Capstone Report.docx
+- **Python Code**: Management Disclosure and COVID-19.ipynb
