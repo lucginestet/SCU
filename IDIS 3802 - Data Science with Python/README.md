@@ -1,3 +1,3 @@
-# SCU
+# Data Science with Python
 
-A collection of a few noteworthy data science projects that I completed during my time at SCU completing my MS in Finance and Analytics.
+Final project that involved using a dataset from Orange Telecom and apply predictive models to forecast customer churn and develop/inform customer retention programs
